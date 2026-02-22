@@ -1,0 +1,258 @@
+pipeline {
+  agent any 
+  stages {
+    stage('test') {
+      steps {
+        sh '''
+          echo "hello ashgan"
+        '''
+      }
+    }
+  }
+}
+
+// pipeline {
+//   agent { label 'aws-agent' }
+
+//   environment {
+//     APP_NAME  = "tetris-frontend"
+//     BUILD_DIR = "build-artifacts"
+
+//     IMAGE_NAME = "tetris-frontend"
+//     IMAGE_TAG  = "${BUILD_NUMBER}"
+//     FULL_IMAGE = "${IMAGE_NAME}:${IMAGE_TAG}"
+
+//     AWS_REGION   = "us-east-1"
+//     ECR_REGISTRY = "101561167685.dkr.ecr.us-east-1.amazonaws.com"
+//     ECR_REPO     = "tetris-frontend"
+
+//     SONAR_HOST        = "http://192.168.163.129:9000"
+//     SONAR_PROJECT_KEY = "tetris-frontend"
+//   }
+
+//   stages {
+
+//     /* =======================
+//        Checkout Frontend Repo
+//     ======================= */
+//     stage('Checkout App Repo') {
+//       steps {
+//         git branch: 'main',
+//             credentialsId: 'Creds-git',
+//             url: 'https://github.com/tetris-app1/Tetris-frontend'
+//       }
+//     }
+
+//     /* =======================
+//        Build Artifacts (Node inside Docker)
+//     ======================= */
+//     stage('Build Artifacts') {
+//       steps {
+//         sh '''
+//           docker run --rm \
+//             -v "$PWD:/app" \
+//             -w /app \
+//             node:14-slim \
+//             bash -c "
+//               npm install &&
+//               npm install react-is &&
+//               npm run build
+//             "
+
+//           rm -rf ${BUILD_DIR}
+//           mkdir -p ${BUILD_DIR}
+//           cp -r build ${BUILD_DIR}/
+//         '''
+//       }
+//     }
+
+//     /* =======================
+//        OWASP Dependency Check
+//     ======================= */
+//     stage('OWASP Dependency Check') {
+//       steps {
+//         withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
+//           sh '''
+//             mkdir -p security-reports/owasp
+//             docker run --rm \
+//               -v $WORKSPACE:/src \
+//               owasp/dependency-check \
+//               --scan /src \
+//               --format HTML \
+//               --out /src/security-reports/owasp \
+//               --nvdApiKey $NVD_KEY || true
+//           '''
+//         }
+//       }
+//     }
+
+//     /* =======================
+//        SonarQube Analysis
+//     ======================= */
+//     stage('SonarQube Analysis') {
+//       steps {
+//         withCredentials([string(credentialsId: 'sonar-creds', variable: 'SONAR_TOKEN')]) {
+//           sh '''
+//             docker run --rm \
+//               --network host \
+//               -v $PWD/${BUILD_DIR}:/usr/src \
+//               sonarsource/sonar-scanner-cli \
+//               -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+//               -Dsonar.sources=/usr/src/build \
+//               -Dsonar.host.url=${SONAR_HOST} \
+//               -Dsonar.login=$SONAR_TOKEN || true
+//           '''
+//         }
+//       }
+//     }
+
+//     /* =======================
+//        Push Build to Nexus
+//     ======================= */
+//     stage('Push Artifacts to Nexus') {
+//       steps {
+//         withCredentials([usernamePassword(
+//           credentialsId: 'nexus-creds',
+//           usernameVariable: 'NEXUS_USER',
+//           passwordVariable: 'NEXUS_PASS'
+//         )]) {
+//           sh '''
+//             zip -r frontend-build.zip ${BUILD_DIR}
+
+//             curl -u $NEXUS_USER:$NEXUS_PASS \
+//               --upload-file frontend-build.zip \
+//               http://192.168.163.129:8081/repository/raw-hosted/frontend-build-${BUILD_NUMBER}.zip
+//           '''
+//         }
+//       }
+//     }
+
+//     /* =======================
+//        Docker Build
+//     ======================= */
+//     stage('Docker Build') {
+//       steps {
+//         sh 'docker build -t ${FULL_IMAGE} .'
+//       }
+//     }
+
+//     /* =======================
+//        Trivy Image Scan
+//     ======================= */
+//     stage('Trivy Image Scan') {
+//       steps {
+//         sh '''
+//           mkdir -p security-reports/trivy
+//           trivy image ${FULL_IMAGE} \
+//             --format template \
+//             --template "@contrib/html.tpl" \
+//             --output security-reports/trivy/trivy-report.html || true
+//         '''
+//       }
+//     }
+
+//     /* =======================
+//        Push Image to NEW AWS ECR
+//     ======================= */
+//     stage('Push Image to AWS ECR') {
+//       steps {
+//         withCredentials([usernamePassword(
+//           credentialsId: 'aws-creds',
+//           usernameVariable: 'AWS_ACCESS_KEY_ID',
+//           passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+//         )]) {
+//           sh '''
+//             export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+//             export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+//             export AWS_DEFAULT_REGION=${AWS_REGION}
+
+//             aws ecr get-login-password --region ${AWS_REGION} | \
+//               docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+//             docker tag ${FULL_IMAGE} ${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}
+//             docker push ${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}
+//           '''
+//         }
+//       }
+//     }
+
+//     /* =======================
+//        Checkout Application Repo (Helm Repo)
+//     ======================= */
+//     stage('Checkout Application Repo') {
+//       steps {
+//         dir('application-repo') {
+//           git branch: 'main',
+//               credentialsId: 'Creds-k8s',
+//               url: 'https://github.com/tetris-app1/Application_Repo'
+//         }
+//       }
+//     }
+
+//     /* =======================
+//        Update FRONTEND Tag ONLY in values.yaml
+//     ======================= */
+//     stage('Update Frontend Tag in Helm') {
+//       steps {
+//         dir('application-repo/apps/tetris-apps') {
+//           withCredentials([usernamePassword(
+//             credentialsId: 'Creds-k8s',
+//             usernameVariable: 'GIT_USER',
+//             passwordVariable: 'GIT_PASS'
+//           )]) {
+//             sh '''
+//               git pull --rebase origin main || true
+
+//               # Update frontend tag only (not backend, not database)
+//               sed -i '/^frontend:/,/^[^ ]/ s/tag: \\".*\\"/tag: \\"${BUILD_NUMBER}\\"/' values.yaml
+
+//               git config user.email "jenkins@ci.local"
+//               git config user.name  "Jenkins CI"
+
+//               git add values.yaml
+//               git commit -m "Update frontend image to ${BUILD_NUMBER}" || echo "No changes"
+
+//               git push https://${GIT_USER}:${GIT_PASS}@github.com/tetris-app1/Application_Repo.git main
+//             '''
+//           }
+//         }
+//       }
+//     }
+//   }
+
+//   post {
+//     always {
+//       archiveArtifacts artifacts: 'security-reports/**',
+//                        fingerprint: true,
+//                        allowEmptyArchive: true
+//       echo "Frontend Pipeline Finished"
+//     }
+
+//     success {
+//       sh '''
+//         curl -X POST http://192.168.163.129:5678/webhook/jenkins/frontend \
+//           -H "Content-Type: application/json" \
+//           -d "{
+//             \\"status\\": \\"SUCCESS\\",
+//             \\"job_name\\": \\"${JOB_NAME}\\",
+//             \\"build_number\\": \\"${BUILD_NUMBER}\\",
+//             \\"image\\": \\"${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}\\",
+//             \\"build_url\\": \\"${BUILD_URL}\\"
+//           }"
+//       '''
+//     }
+
+//     failure {
+//       sh '''
+//         curl -X POST http://192.168.163.129:5678/webhook/jenkins/frontend \
+//           -H "Content-Type: application/json" \
+//           -d "{
+//             \\"status\\": \\"FAILED\\",
+//             \\"job_name\\": \\"${JOB_NAME}\\",
+//             \\"build_number\\": \\"${BUILD_NUMBER}\\",
+//             \\"build_url\\": \\"${BUILD_URL}\\"
+//           }"
+//       '''
+//     }
+//   }
+// }
